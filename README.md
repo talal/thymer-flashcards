@@ -4,6 +4,21 @@ A spaced repetition flashcards plugin for [Thymer](https://thymer.com) powered b
 
 Create flashcards directly inside your notes using a simple `Question :: Answer` syntax, then practice them with Anki-style spaced repetition.
 
+## Installation
+
+### From GitHub Release (recommended)
+
+1. Go to the [latest release](https://github.com/talal/thymer-flashcards/releases/latest)
+2. Download `plugin.js` and `plugin.json`
+3. In Thymer, open Command Palette (`Cmd+P` / `Ctrl+P`) → **Plugins** → **Create Plugin**
+4. Paste the contents of `plugin.js` into **Custom Code**
+5. Paste the contents of `plugin.json` into **Configuration**
+6. Save
+
+### From Source
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions.
+
 ## Flashcard Syntax
 
 Write flashcards anywhere in your notes using the `::` separator:
@@ -58,47 +73,6 @@ A summary screen is displayed when all due cards have been reviewed.
 | `3` | Rate: Good |
 | `4` | Rate: Easy |
 
-## Development
-
-### Prerequisites
-
-- Node.js 20+
-- Chrome with `--remote-debugging-port=9222` for hot reload
-
-### Setup
-
-```bash
-# Install dependencies
-npm install
-
-# Production build
-npm run build
-
-# Development with hot reload
-npm run dev
-```
-
-### Project Structure
-
-```
-thymer-flashcards/
-├── plugin.js          # Main plugin code
-├── plugin.json        # Plugin configuration
-├── styles.css         # Practice UI styles
-├── dev.js             # Build & hot-reload script
-├── types.d.ts         # Thymer Plugin SDK type definitions
-└── dist/
-    └── plugin.js      # Bundled output (includes ts-fsrs)
-```
-
-### Installing in Thymer
-
-1. Build the plugin: `npm run build`
-2. In Thymer, open Command Palette → "Plugins" → "Create Plugin"
-3. In the code editor, paste the contents of `dist/plugin.js` into **Custom Code**
-4. Paste the contents of `plugin.json` into **Configuration**
-5. Save
-
 ## FSRS Defaults
 
 | Parameter | Value |
@@ -109,3 +83,7 @@ thymer-flashcards/
 | Short-term learning | Enabled |
 | Learning steps | 1m, 10m |
 | Relearning steps | 10m |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, project structure, and release instructions.
