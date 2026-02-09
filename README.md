@@ -1,0 +1,111 @@
+# Thymer Flashcards Plugin
+
+A spaced repetition flashcards plugin for [Thymer](https://thymer.com) powered by [FSRS-6](https://github.com/open-spaced-repetition/ts-fsrs) (Free Spaced Repetition Scheduler).
+
+Create flashcards directly inside your notes using a simple `Question :: Answer` syntax, then practice them with Anki-style spaced repetition.
+
+## Flashcard Syntax
+
+Write flashcards anywhere in your notes using the `::` separator:
+
+```
+Capital of France? :: Paris
+Who created this plugin? :: Claude
+```
+
+Each line containing `::` with non-empty text on both sides is treated as a flashcard.
+
+## Commands
+
+Open the Command Palette (`Cmd+P` / `Ctrl+P`) and search for:
+
+### Flashcards: Generate
+
+Scans **all notes** in your workspace for lines matching the `Question :: Answer` pattern. New flashcards are initialized with FSRS metadata so they'll appear in your next practice session. Already-tracked flashcards are left untouched.
+
+Run this after adding new flashcards to your notes.
+
+### Flashcards: Practice
+
+Opens a practice panel showing all flashcards that are currently due for review. For each card:
+
+1. The **question** is shown first
+2. Click the card or press `Space` to **reveal the answer**
+3. Rate your recall:
+   - **Again** (`1`) — Forgot completely, review again soon
+   - **Hard** (`2`) — Recalled with significant difficulty
+   - **Good** (`3`) — Recalled correctly with some effort
+   - **Easy** (`4`) — Recalled instantly, no effort needed
+
+Each button shows the predicted next review interval. After rating, the FSRS algorithm updates the card's schedule and the next card is shown.
+
+A summary screen is displayed when all due cards have been reviewed.
+
+## How It Works
+
+- Flashcard metadata (due date, stability, difficulty, repetition count, etc.) is stored as **meta properties directly on each line item** in your notes
+- The [FSRS-6 algorithm](https://github.com/open-spaced-repetition/ts-fsrs) schedules reviews based on your ratings, optimizing for ~90% retention
+- Cards start in the **New** state and progress through **Learning → Review** as you practice
+- Forgotten cards enter a **Relearning** phase with shorter intervals
+
+## Keyboard Shortcuts (Practice Panel)
+
+| Key | Action |
+|-----|--------|
+| `Space` | Reveal answer |
+| `1` | Rate: Again |
+| `2` | Rate: Hard |
+| `3` | Rate: Good |
+| `4` | Rate: Easy |
+
+## Development
+
+### Prerequisites
+
+- Node.js 20+
+- Chrome with `--remote-debugging-port=9222` for hot reload
+
+### Setup
+
+```bash
+# Install dependencies
+npm install
+
+# Production build
+npm run build
+
+# Development with hot reload
+npm run dev
+```
+
+### Project Structure
+
+```
+thymer-flashcards/
+├── plugin.js          # Main plugin code
+├── plugin.json        # Plugin configuration
+├── styles.css         # Practice UI styles
+├── dev.js             # Build & hot-reload script
+├── types.d.ts         # Thymer Plugin SDK type definitions
+└── dist/
+    └── plugin.js      # Bundled output (includes ts-fsrs)
+```
+
+### Installing in Thymer
+
+1. Build the plugin: `npm run build`
+2. In Thymer, open Command Palette → "Plugins" → "Create Plugin"
+3. In the code editor, paste the contents of `dist/plugin.js` into **Custom Code**
+4. Paste the contents of `plugin.json` into **Configuration**
+5. Save
+
+## FSRS Defaults
+
+| Parameter | Value |
+|-----------|-------|
+| Target retention | 90% |
+| Maximum interval | 365 days |
+| Fuzzing | Enabled |
+| Short-term learning | Enabled |
+| Learning steps | 1m, 10m |
+| Relearning steps | 10m |

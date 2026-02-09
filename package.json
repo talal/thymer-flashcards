@@ -1,0 +1,21 @@
+{
+  "name": "thymer-flashcards",
+  "version": "0.1.0",
+  "license": "MIT",
+  "author": "Muhammad Talal Anwar",
+  "type": "module",
+  "types": "./types.d.ts",
+  "scripts": {
+    "dev": "node dev.js",
+    "dev:verbose": "node dev.js --print-code",
+    "build": "node dev.js --once"
+  },
+  "devDependencies": {
+    "chokidar": "latest",
+    "chrome-remote-interface": "latest"
+  },
+  "dependencies": {
+    "esbuild": "^0.25.6",
+    "ts-fsrs": "^5.2.3"
+  }
+}
