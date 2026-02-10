@@ -839,7 +839,17 @@ export class Plugin extends AppPlugin {
 
 		const cards = this._dueCards || [];
 		const idx = this._practiceIndex || 0;
-		if (idx >= cards.length) return;
+
+		// Session complete screen — Space closes the panel
+		if (idx >= cards.length) {
+			if (e.code === 'Space' || e.key === ' ') {
+				e.preventDefault();
+				const p = this._panel;
+				this._cleanup();
+				if (p) this.ui.closePanel(p);
+			}
+			return;
+		}
 
 		if (!this._practiceRevealed) {
 			if (e.code === 'Space' || e.key === ' ') {
