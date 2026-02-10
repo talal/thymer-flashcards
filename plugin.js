@@ -760,10 +760,6 @@ export class Plugin extends AppPlugin {
 				<div class="flashcard-divider"></div>
 				<div class="flashcard-answer">${esc(entry.answer)}</div>
 			`;
-		} else {
-			cardInner += `
-				<div class="flashcard-reveal-hint">Click or press Space to reveal</div>
-			`;
 		}
 
 		let buttonsHTML = '';
@@ -801,7 +797,7 @@ export class Plugin extends AppPlugin {
 		} else {
 			buttonsHTML = `
 				<div class="flashcard-shortcuts">
-					<kbd>Space</kbd> Reveal answer
+					Click the card or press <kbd>Space</kbd> to reveal answer
 				</div>
 			`;
 		}
