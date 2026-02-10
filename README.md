@@ -40,6 +40,21 @@ Scans **all notes** in your workspace for lines matching the `Question :: Answer
 
 Run this after adding new flashcards to your notes.
 
+### Flashcards: Dashboard
+
+Opens a dashboard panel with a table view of all your generated flashcards. The table includes:
+
+| Column | Description |
+|--------|-------------|
+| **Parent Note** | The note containing the flashcard — click to open it in a new split panel |
+| **Front** | The question (text before `::`) |
+| **Back** | The answer (text after `::`) |
+| **Due** | Next review date (e.g. `Feb 10, 2026`) or `New` if never reviewed |
+| **Reviews** | Total number of reviews completed |
+| **Last Practiced** | Day, date, and time in 24hr format (e.g. `Tue Feb 10, 2026 16:00`) or `Never` |
+
+Only flashcards that have been initialized via **Flashcards: Generate** appear in the dashboard.
+
 ### Flashcards: Practice
 
 Opens a practice panel showing all flashcards that are currently due for review. For each card:
@@ -90,7 +105,7 @@ A summary screen is displayed when all due cards have been reviewed.
   - [x] Single-line basic (one direction) cards
   - [ ] Bidirectional cards — front and reverse directions
   - [ ] Multi-line cards
-  - [ ] Dashboard
+  - [x] Dashboard
   - [ ] Cloze (fill-in-the-blank) cards
   - [ ] Image occlusion — select areas of image which become flashcards
   - [ ] AI support

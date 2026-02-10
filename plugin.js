@@ -13,6 +13,7 @@ const f = fsrs({
 const SEPARATOR = '::';
 const META_PREFIX = 'fc_';
 const PANEL_ID = 'flashcard-practice';
+const DASHBOARD_PANEL_ID = 'flashcard-dashboard';
 
 // Meta property keys stored on each flashcard line item
 const META = {
@@ -148,6 +149,39 @@ function esc(str) {
 	return el.innerHTML;
 }
 
+/**
+ * Format a date as "Mon DD, YYYY" (e.g. "Feb 10, 2026").
+ * @param {Date} date
+ * @returns {string}
+ */
+function _formatDueDate(date) {
+	return date.toLocaleDateString('en-US', {
+		month: 'short',
+		day: 'numeric',
+		year: 'numeric',
+	});
+}
+
+/**
+ * Format a date as "Day Mon DD, YYYY HH:MM" 24hr (e.g. "Tue Feb 10, 2026 16:00").
+ * @param {Date} date
+ * @returns {string}
+ */
+function _formatLastPracticed(date) {
+	const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+	const monthDay = date.toLocaleDateString('en-US', {
+		month: 'short',
+		day: 'numeric',
+		year: 'numeric',
+	});
+	const time = date.toLocaleTimeString('en-US', {
+		hour: '2-digit',
+		minute: '2-digit',
+		hour12: false,
+	});
+	return `${dayName} ${monthDay} ${time}`;
+}
+
 
 // ─── Plugin ─────────────────────────────────────────────────────────────────
 
@@ -155,6 +189,129 @@ export class Plugin extends AppPlugin {
 
 	onLoad() {
 		this.ui.injectCSS(css);
+		this.ui.injectCSS(`
+/* ── Flashcard Dashboard ────────────────────────────── */
+.fc-dashboard-container {
+	height: 100%;
+	overflow-y: auto;
+	padding: 32px 24px 40px;
+	box-sizing: border-box;
+	font-family: inherit;
+	color: inherit;
+	width: 100%;
+	max-width: 100%;
+}
+.fc-dashboard-header {
+	margin-bottom: 24px;
+}
+.fc-dashboard-title {
+	font-size: 22px;
+	font-weight: 700;
+	margin-bottom: 4px;
+}
+.fc-dashboard-subtitle {
+	font-size: 13px;
+	opacity: 0.45;
+}
+.fc-dashboard-loading {
+	font-size: 14px;
+	opacity: 0.5;
+	padding: 40px 0;
+	text-align: center;
+}
+.fc-dashboard-table-wrap {
+	border-radius: 8px;
+	border: 1px solid rgba(128,128,128,0.18);
+}
+.fc-dashboard-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+.fc-dashboard-table thead th {
+	text-align: left;
+	font-weight: 600;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	opacity: 0.45;
+	padding: 10px 14px;
+	border-bottom: 1px solid rgba(128,128,128,0.18);
+	white-space: nowrap;
+	position: sticky;
+	top: 0;
+}
+.fc-dashboard-table tbody tr {
+	border-bottom: 1px solid rgba(128,128,128,0.09);
+	transition: background 0.12s ease;
+}
+.fc-dashboard-table tbody tr:last-child {
+	border-bottom: none;
+}
+.fc-dashboard-table tbody tr:hover {
+	background: rgba(128,128,128,0.06);
+}
+.fc-dashboard-table td {
+	padding: 10px 14px;
+	vertical-align: middle;
+	line-height: 1.45;
+}
+.fc-dashboard-cell-note {
+	white-space: nowrap;
+}
+.fc-dashboard-cell-front,
+.fc-dashboard-cell-back {
+	max-width: 0;
+	width: 50%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.fc-dashboard-cell-front {
+	font-weight: 500;
+}
+.fc-dashboard-cell-back {
+	opacity: 0.7;
+}
+.fc-dashboard-cell-due,
+.fc-dashboard-cell-reviews,
+.fc-dashboard-cell-last {
+	white-space: nowrap;
+}
+.fc-dashboard-note-link {
+	color: #6ea8e4;
+	text-decoration: none;
+	font-weight: 500;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.fc-dashboard-note-link:hover {
+	text-decoration: underline;
+	opacity: 0.85;
+}
+.fc-dashboard-badge-new {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 4px;
+	font-size: 11px;
+	font-weight: 600;
+	background: rgba(80,145,220,0.15);
+	color: #5091dc;
+}
+.fc-dashboard-badge-never {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 4px;
+	font-size: 11px;
+	font-weight: 600;
+	background: rgba(128,128,128,0.12);
+	opacity: 0.55;
+}
+.fc-dashboard-due-now {
+	color: #dca032;
+	font-weight: 600;
+}
+		`);
 
 		this.ui.addCommandPaletteCommand({
 			label: 'Flashcards: Generate',
@@ -168,10 +325,22 @@ export class Plugin extends AppPlugin {
 			onSelected: () => this.practiceFlashcards(),
 		});
 
+		this.ui.addCommandPaletteCommand({
+			label: 'Flashcards: Dashboard',
+			icon: 'books',
+			onSelected: () => this.openDashboard(),
+		});
+
 		// Register custom panel for practice UI
 		this.ui.registerCustomPanelType(PANEL_ID, (panel) => {
 			panel.setTitle('Practice Flashcards');
 			this._renderPracticePanel(panel);
+		});
+
+		// Register custom panel for dashboard
+		this.ui.registerCustomPanelType(DASHBOARD_PANEL_ID, (panel) => {
+			panel.setTitle('Flashcards Dashboard');
+			this._renderDashboardPanel(panel);
 		});
 	}
 
@@ -215,6 +384,199 @@ export class Plugin extends AppPlugin {
 			dismissible: true,
 			autoDestroyTime: 5000,
 		});
+	}
+
+	// ── Dashboard ─────────────────────────────────────────────────────────
+
+	async openDashboard() {
+		const panel = this.ui.getActivePanel();
+		if (panel) {
+			panel.navigateToCustomType(DASHBOARD_PANEL_ID);
+		}
+	}
+
+	/**
+	 * Collect all generated flashcard line items (not just due ones).
+	 * Only includes cards that have been initialized via "Flashcards: Generate".
+	 * @returns {Promise<Array<{ lineItem: PluginLineItem, card: import('ts-fsrs').Card, question: string, answer: string, recordName: string, recordGuid: string }>>}
+	 */
+	async _collectAllCards() {
+		const allRecords = this.data.getAllRecords();
+		const allCards = [];
+
+		for (const record of allRecords) {
+			let lineItems;
+			try {
+				lineItems = await record.getLineItems();
+			} catch {
+				continue;
+			}
+
+			for (const li of lineItems) {
+				const fc = parseFlashcard(li);
+				if (!fc) continue;
+				if (!hasCardMeta(li)) continue;
+
+				const card = metaToCard(li);
+				allCards.push({
+					lineItem: li,
+					card,
+					question: fc.question,
+					answer: fc.answer,
+					recordName: record.getName(),
+					recordGuid: record.guid,
+				});
+			}
+		}
+
+		return allCards;
+	}
+
+	/**
+	 * @param {PluginPanel} panel
+	 */
+	async _renderDashboardPanel(panel) {
+		const el = panel.getElement();
+		if (!el) return;
+
+		el.innerHTML = '';
+		const container = document.createElement('div');
+		container.className = 'fc-dashboard-container';
+		el.appendChild(container);
+
+		// Loading state
+		container.innerHTML = `
+			<div class="fc-dashboard-header">
+				<div class="fc-dashboard-title">📋 Flashcards Dashboard</div>
+			</div>
+			<div class="fc-dashboard-loading">Loading flashcards…</div>
+		`;
+
+		const allCards = await this._collectAllCards();
+
+		container.innerHTML = '';
+
+		// Header
+		const header = document.createElement('div');
+		header.className = 'fc-dashboard-header';
+		header.innerHTML = `
+			<div class="fc-dashboard-title">📋 Flashcards Dashboard</div>
+			<div class="fc-dashboard-subtitle">${allCards.length} flashcard${allCards.length !== 1 ? 's' : ''} found</div>
+		`;
+		container.appendChild(header);
+
+		if (allCards.length === 0) {
+			container.innerHTML += `
+				<div class="flashcard-empty">
+					<div class="flashcard-empty-emoji">📭</div>
+					<div class="flashcard-empty-title">No flashcards found</div>
+					<div class="flashcard-empty-subtitle">
+						Use <strong>Flashcards: Generate</strong> to scan your notes,<br>
+						or write cards with the <code>${esc(SEPARATOR)}</code> syntax:<br>
+						<code>Question ${esc(SEPARATOR)} Answer</code>
+					</div>
+				</div>
+			`;
+			return;
+		}
+
+		// Table
+		const tableWrap = document.createElement('div');
+		tableWrap.className = 'fc-dashboard-table-wrap';
+
+		const table = document.createElement('table');
+		table.className = 'fc-dashboard-table';
+		table.innerHTML = `
+			<thead>
+				<tr>
+					<th class="fc-dashboard-cell-note">Parent Note</th>
+					<th class="fc-dashboard-cell-front">Front</th>
+					<th class="fc-dashboard-cell-back">Back</th>
+					<th class="fc-dashboard-cell-due">Due</th>
+					<th class="fc-dashboard-cell-reviews">Reviews</th>
+					<th class="fc-dashboard-cell-last">Last Practiced</th>
+				</tr>
+			</thead>
+		`;
+
+		const tbody = document.createElement('tbody');
+
+		for (const entry of allCards) {
+			const tr = document.createElement('tr');
+
+			// Parent Note (clickable)
+			const tdNote = document.createElement('td');
+			tdNote.className = 'fc-dashboard-cell-note';
+			const noteLink = document.createElement('a');
+			noteLink.className = 'fc-dashboard-note-link';
+			noteLink.textContent = entry.recordName;
+			noteLink.href = '#';
+			noteLink.addEventListener('click', async (e) => {
+				e.preventDefault();
+				const wsGuid = this.getWorkspaceGuid();
+				const newPanel = await this.ui.createPanel({ afterPanel: panel });
+				if (newPanel) {
+					setTimeout(() => {
+						newPanel.navigateTo({
+							type: 'edit_panel',
+							rootId: entry.recordGuid,
+							subId: null,
+							workspaceGuid: wsGuid,
+						});
+					}, 0);
+				}
+			});
+			tdNote.appendChild(noteLink);
+			tr.appendChild(tdNote);
+
+			// Front
+			const tdFront = document.createElement('td');
+			tdFront.className = 'fc-dashboard-cell-front';
+			tdFront.textContent = entry.question;
+			tr.appendChild(tdFront);
+
+			// Back
+			const tdBack = document.createElement('td');
+			tdBack.className = 'fc-dashboard-cell-back';
+			tdBack.textContent = entry.answer;
+			tr.appendChild(tdBack);
+
+			// Due
+			const tdDue = document.createElement('td');
+			tdDue.className = 'fc-dashboard-cell-due';
+			const dueDate = entry.card.due;
+			if (entry.card.state === 0 && entry.card.reps === 0) {
+				tdDue.innerHTML = '<span class="fc-dashboard-badge-new">New</span>';
+			} else {
+				tdDue.textContent = _formatDueDate(dueDate);
+				if (dueDate <= new Date()) {
+					tdDue.classList.add('fc-dashboard-due-now');
+				}
+			}
+			tr.appendChild(tdDue);
+
+			// Reviews
+			const tdReviews = document.createElement('td');
+			tdReviews.className = 'fc-dashboard-cell-reviews';
+			tdReviews.textContent = String(entry.card.reps);
+			tr.appendChild(tdReviews);
+
+			// Last Practiced
+			const tdLastPracticed = document.createElement('td');
+			tdLastPracticed.className = 'fc-dashboard-cell-last';
+			if (entry.card.last_review) {
+				tdLastPracticed.textContent = _formatLastPracticed(entry.card.last_review);
+			} else {
+				tdLastPracticed.innerHTML = '<span class="fc-dashboard-badge-never">Never</span>';
+			}
+			tr.appendChild(tdLastPracticed);
+
+			tbody.appendChild(tr);
+		}
+
+		table.appendChild(tbody);
+		tableWrap.appendChild(table);
+		container.appendChild(tableWrap);
 	}
 
 	// ── Practice flashcards ───────────────────────────────────────────────
