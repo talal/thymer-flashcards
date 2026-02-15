@@ -346,7 +346,7 @@ export class Plugin extends AppPlugin {
 		// Sidebar item — opens the dashboard
 		this.ui.addSidebarItem({
 			label: 'Flashcards',
-			icon: 'books',
+			icon: 'ti-flame',
 			tooltip: 'Flashcards Dashboard',
 			onClick: () => this.openDashboard(),
 		});
