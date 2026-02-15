@@ -315,31 +315,31 @@ export class Plugin extends AppPlugin {
 
 		this.ui.addCommandPaletteCommand({
 			label: 'Flashcards: Generate',
-			icon: 'books',
+			icon: 'ti-flame',
 			onSelected: () => this.generateFlashcards(),
 		});
 
 		this.ui.addCommandPaletteCommand({
 			label: 'Flashcards: Practice All Cards',
-			icon: 'books',
+			icon: 'ti-flame',
 			onSelected: () => this.practiceFlashcards(),
 		});
 
 		this.ui.addCommandPaletteCommand({
 			label: 'Flashcards: Practice This Note',
-			icon: 'books',
+			icon: 'ti-flame',
 			onSelected: () => this.practiceThisNote(),
 		});
 
 		this.ui.addCommandPaletteCommand({
 			label: 'Flashcards: Practice Collection',
-			icon: 'books',
+			icon: 'ti-flame',
 			onSelected: () => this.practiceCollection(),
 		});
 
 		this.ui.addCommandPaletteCommand({
 			label: 'Flashcards: Dashboard',
-			icon: 'books',
+			icon: 'ti-flame',
 			onSelected: () => this.openDashboard(),
 		});
 
