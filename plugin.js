@@ -343,6 +343,14 @@ export class Plugin extends AppPlugin {
 			onSelected: () => this.openDashboard(),
 		});
 
+		// Sidebar item — opens the dashboard
+		this.ui.addSidebarItem({
+			label: 'Flashcards',
+			icon: 'books',
+			tooltip: 'Flashcards Dashboard',
+			onClick: () => this.openDashboard(),
+		});
+
 		// Register custom panel for practice UI
 		this.ui.registerCustomPanelType(PANEL_ID, (panel) => {
 			const title = this._practiceTitle || 'Practice Flashcards';
