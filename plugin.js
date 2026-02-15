@@ -326,6 +326,18 @@ export class Plugin extends AppPlugin {
 		});
 
 		this.ui.addCommandPaletteCommand({
+			label: 'Flashcards: Practice This Note',
+			icon: 'books',
+			onSelected: () => this.practiceThisNote(),
+		});
+
+		this.ui.addCommandPaletteCommand({
+			label: 'Flashcards: Practice Collection',
+			icon: 'books',
+			onSelected: () => this.practiceCollection(),
+		});
+
+		this.ui.addCommandPaletteCommand({
 			label: 'Flashcards: Dashboard',
 			icon: 'books',
 			onSelected: () => this.openDashboard(),
@@ -333,7 +345,8 @@ export class Plugin extends AppPlugin {
 
 		// Register custom panel for practice UI
 		this.ui.registerCustomPanelType(PANEL_ID, (panel) => {
-			panel.setTitle('Practice Flashcards');
+			const title = this._practiceTitle || 'Practice Flashcards';
+			panel.setTitle(title);
 			this._renderPracticePanel(panel);
 		});
 
@@ -581,14 +594,21 @@ export class Plugin extends AppPlugin {
 
 	// ── Practice flashcards ───────────────────────────────────────────────
 
-	async practiceFlashcards() {
-		// Collect all due flashcards
-		const due = await this._collectDueCards();
+	/**
+	 * Start a practice session with optional title and filter context.
+	 * @param {object} [opts]
+	 * @param {Set<string>} [opts.recordGuids] - if provided, only practice cards from these records
+	 * @param {string} [opts.title] - custom panel title
+	 */
+	async _startPracticeSession({ recordGuids, title } = {}) {
+		const due = await this._collectDueCards({ recordGuids });
 
 		this._dueCards = due;
 		this._practiceIndex = 0;
 		this._practiceRevealed = false;
 		this._practiceStats = { again: 0, hard: 0, good: 0, easy: 0 };
+		this._practiceTitle = title || 'Practice Flashcards';
+		this._practiceRecordGuids = recordGuids || null;
 
 		// Navigate current panel to practice UI
 		const panel = this.ui.getActivePanel();
@@ -597,16 +617,151 @@ export class Plugin extends AppPlugin {
 		}
 	}
 
+	async practiceFlashcards() {
+		await this._startPracticeSession();
+	}
+
+	// ── Practice this note ────────────────────────────────────────────────
+
+	async practiceThisNote() {
+		const panel = this.ui.getActivePanel();
+		if (!panel) return;
+
+		const record = panel.getActiveRecord();
+		if (!record) {
+			this.ui.addToaster({
+				title: 'No active note',
+				message: 'Open a note first, then run "Flashcards: Practice This Note".',
+				dismissible: true,
+				autoDestroyTime: 4000,
+			});
+			return;
+		}
+
+		const recordGuids = new Set([record.guid]);
+		const title = `Practice: ${record.getName()}`;
+		await this._startPracticeSession({ recordGuids, title });
+	}
+
+	// ── Practice collection ───────────────────────────────────────────────
+
+	async practiceCollection() {
+		const panel = this.ui.getActivePanel();
+		if (!panel) return;
+
+		// First check if the active panel is showing a collection view
+		let collection = panel.getActiveCollection();
+
+		if (!collection) {
+			// Not on a collection view — offer a picker from all collections
+			const allCollections = await this.data.getAllCollections();
+			if (!allCollections || allCollections.length === 0) {
+				this.ui.addToaster({
+					title: 'No collections found',
+					message: 'Create a collection first, or navigate to one.',
+					dismissible: true,
+					autoDestroyTime: 4000,
+				});
+				return;
+			}
+
+			// Invisible anchor element positioned at screen centre for the dropdown
+			const dummyBtn = document.createElement('button');
+			dummyBtn.style.position = 'fixed';
+			dummyBtn.style.left = '50%';
+			dummyBtn.style.top = '50%';
+			dummyBtn.style.transform = 'translate(-50%, -50%)';
+			dummyBtn.style.width = '0';
+			dummyBtn.style.height = '0';
+			dummyBtn.style.opacity = '0';
+			dummyBtn.style.pointerEvents = 'none';
+			document.body.appendChild(dummyBtn);
+
+			// Outside-click handler (declared as let so cleanup can reference it)
+			let onOutsideClick = null;
+			let dropdown = null;
+
+			// Helper to tear down the anchor button and listener
+			const cleanupAnchor = () => {
+				if (dummyBtn.parentNode) dummyBtn.remove();
+				if (onOutsideClick) {
+					document.removeEventListener('mousedown', onOutsideClick, true);
+				}
+			};
+
+			// Build dropdown options — each cleans up the anchor after selecting
+			const options = allCollections.map(c => ({
+				label: c.getName(),
+				onSelected: () => {
+					cleanupAnchor();
+					this._practiceCollectionByRef(c);
+				},
+			}));
+
+			dropdown = this.ui.createDropdown({
+				attachedTo: dummyBtn,
+				options,
+				inputPlaceholder: 'Pick a collection…',
+				width: 320,
+			});
+
+			// If the user clicks outside the dropdown, tear everything down
+			onOutsideClick = (e) => {
+				// Give the dropdown a frame to handle its own click
+				requestAnimationFrame(() => {
+					// If the anchor is already gone an onSelected handler fired
+					if (!dummyBtn.parentNode) return;
+					cleanupAnchor();
+					dropdown.destroy();
+				});
+			};
+			// Delay attaching so the current click doesn't immediately dismiss
+			requestAnimationFrame(() => {
+				document.addEventListener('mousedown', onOutsideClick, true);
+			});
+
+			return;
+		}
+
+		await this._practiceCollectionByRef(collection);
+	}
+
+	/**
+	 * Start a practice session scoped to a specific collection.
+	 * @param {PluginCollectionAPI} collection
+	 */
+	async _practiceCollectionByRef(collection) {
+		const records = await collection.getAllRecords();
+		if (!records || records.length === 0) {
+			this.ui.addToaster({
+				title: 'No records in collection',
+				message: `"${collection.getName()}" has no notes.`,
+				dismissible: true,
+				autoDestroyTime: 4000,
+			});
+			return;
+		}
+
+		const recordGuids = new Set(records.map(r => r.guid));
+		const title = `Practice: ${collection.getName()}`;
+		await this._startPracticeSession({ recordGuids, title });
+	}
+
 	/**
 	 * Collect flashcard line items that are due for review.
+	 * @param {object} [opts]
+	 * @param {Set<string>} [opts.recordGuids] - if provided, only include cards from these records
 	 * @returns {Promise<Array<{ lineItem: PluginLineItem, card: import('ts-fsrs').Card, question: string, answer: string, recordName: string }>>}
 	 */
-	async _collectDueCards() {
+	async _collectDueCards({ recordGuids } = {}) {
 		const now = new Date();
 		const allRecords = this.data.getAllRecords();
 		const dueCards = [];
 
 		for (const record of allRecords) {
+			// Skip records not in the filter set (if provided)
+			if (recordGuids && !recordGuids.has(record.guid)) continue;
+
 			let lineItems;
 			try {
 				lineItems = await record.getLineItems();
@@ -648,7 +803,7 @@ export class Plugin extends AppPlugin {
 
 		// Fetch due cards if we don't have them yet (e.g., panel restored)
 		if (!this._dueCards) {
-			this._dueCards = await this._collectDueCards();
+			this._dueCards = await this._collectDueCards({ recordGuids: this._practiceRecordGuids });
 			this._practiceIndex = 0;
 			this._practiceRevealed = false;
 			this._practiceStats = { again: 0, hard: 0, good: 0, easy: 0 };
@@ -679,12 +834,21 @@ export class Plugin extends AppPlugin {
 
 		container.innerHTML = '';
 
+		// Scope subtitle (shown when practicing a specific note or collection)
+		const scopeTitle = this._practiceTitle && this._practiceTitle !== 'Practice Flashcards'
+			? this._practiceTitle.replace(/^Practice:\s*/, '')
+			: null;
+		const scopeHTML = scopeTitle
+			? `<div class="flashcard-scope" style="text-align:center;opacity:0.5;font-size:13px;margin-bottom:8px;">Scope: <strong>${esc(scopeTitle)}</strong></div>`
+			: '';
+
 		// No cards due
 		if (total === 0) {
 			container.innerHTML = `
 				<div class="flashcard-empty">
 					<div class="flashcard-empty-emoji">🎉</div>
 					<div class="flashcard-empty-title">No flashcards due</div>
+					${scopeHTML}
 					<div class="flashcard-empty-subtitle">
 						All caught up! Come back later, or use<br>
 						<strong>Flashcards: Generate</strong> to scan your notes for new cards.
@@ -704,6 +868,7 @@ export class Plugin extends AppPlugin {
 				<div class="flashcard-done">
 					<div class="flashcard-done-emoji">✅</div>
 					<div class="flashcard-done-title">Session complete!</div>
+					${scopeHTML}
 					<div class="flashcard-done-subtitle">You reviewed ${total} card${total !== 1 ? 's' : ''}.</div>
 					<div class="flashcard-done-stats">
 						<div class="flashcard-stat flashcard-stat--again">
@@ -910,6 +1075,8 @@ export class Plugin extends AppPlugin {
 		this._practiceIndex = 0;
 		this._practiceRevealed = false;
 		this._practiceStats = null;
+		this._practiceTitle = null;
+		this._practiceRecordGuids = null;
 		this._panelEl = null;
 		this._panel = null;
 	}
