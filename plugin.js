@@ -320,7 +320,7 @@ export class Plugin extends AppPlugin {
 		});
 
 		this.ui.addCommandPaletteCommand({
-			label: 'Flashcards: Practice',
+			label: 'Flashcards: Practice All Cards',
 			icon: 'books',
 			onSelected: () => this.practiceFlashcards(),
 		});
