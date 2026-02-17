@@ -51,6 +51,53 @@
 	transition: width 0.35s ease;
 }
 
+/* ---- Breadcrumb (sits above the card) ---- */
+.flashcard-breadcrumb {
+	display: flex;
+	align-items: center;
+	gap: 0;
+	font-size: 12px;
+	width: 100%;
+	max-width: 600px;
+	margin-bottom: 10px;
+	overflow: hidden;
+	white-space: nowrap;
+	line-height: 1.4;
+}
+
+.flashcard-breadcrumb-note {
+	color: #6ea8e4;
+	text-decoration: none;
+	font-weight: 600;
+	cursor: pointer;
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.flashcard-breadcrumb-note:hover {
+	text-decoration: underline;
+	opacity: 0.85;
+}
+
+.flashcard-breadcrumb-sep {
+	flex: 0 0 auto;
+	margin: 0 5px;
+	opacity: 0.35;
+	font-size: 13px;
+}
+
+.flashcard-breadcrumb-crumb {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	opacity: 0.45;
+}
+
 /* ---- Card ---- */
 .flashcard-card {
 	width: 100%;
@@ -94,19 +141,6 @@
 
 .flashcard-card:active {
 	transform: scale(0.995);
-}
-
-/* ---- Source label ---- */
-.flashcard-source {
-	font-size: 11px;
-	opacity: 0.35;
-	margin-bottom: 16px;
-	text-align: center;
-	max-width: 100%;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	position: relative;
 }
 
 /* ---- Question / Answer text ---- */

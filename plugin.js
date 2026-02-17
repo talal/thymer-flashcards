@@ -69,6 +69,72 @@ function hasCardMeta(lineItem) {
 }
 
 /**
+ * Build the ancestor breadcrumb for a flashcard line item.
+ * Returns an array of ancestor text strings from root (top-level) down to
+ * the immediate parent of the given line item. Does NOT include the line item itself.
+ * @param {PluginLineItem} lineItem - the flashcard line item
+ * @param {PluginLineItem[]} allLineItems - all line items from the same record
+ * @returns {string[]}
+ */
+function buildAncestorBreadcrumb(lineItem, allLineItems) {
+	const byGuid = new Map();
+	for (const li of allLineItems) {
+		byGuid.set(li.guid, li);
+	}
+
+	const ancestors = [];
+	let current = lineItem;
+	while (current.parent_guid) {
+		const parent = byGuid.get(current.parent_guid);
+		if (!parent) break;
+		const text = segmentsToText(parent.segments).trim();
+		if (text) ancestors.unshift(text);
+		current = parent;
+	}
+	return ancestors;
+}
+
+/**
+ * Truncate a string to a maximum length, appending "…" if needed.
+ * @param {string} str
+ * @param {number} max
+ * @returns {string}
+ */
+function truncateStr(str, max) {
+	if (str.length <= max) return str;
+	if (max <= 1) return '…';
+	return str.slice(0, max - 1).trimEnd() + '…';
+}
+
+/**
+ * Build truncated breadcrumb parts (note name + ancestor crumbs) that fit
+ * within a character budget.
+ * @param {string} noteName
+ * @param {string[]} ancestors
+ * @param {number} [budget=90]
+ * @returns {{ noteName: string, crumbs: string[] }}
+ */
+function truncateBreadcrumbs(noteName, ancestors, budget) {
+	if (budget == null) budget = 90;
+	// separator " > " costs 3 chars each
+	const sepCost = (ancestors.length > 0 ? ancestors.length : 0) * 3;
+	const available = Math.max(10, budget - sepCost);
+
+	if (ancestors.length === 0) {
+		return { noteName: truncateStr(noteName, available), crumbs: [] };
+	}
+
+	// Give note name ~30% of budget, rest shared among ancestors
+	const noteMax = Math.max(8, Math.floor(available * 0.3));
+	const truncatedNote = truncateStr(noteName, noteMax);
+	const remaining = available - truncatedNote.length;
+	const perCrumb = Math.max(6, Math.floor(remaining / ancestors.length));
+
+	const crumbs = ancestors.map(a => truncateStr(a, perCrumb));
+	return { noteName: truncatedNote, crumbs };
+}
+
+/**
  * Reconstruct an FSRS Card object from line item meta properties.
  * @param {PluginLineItem} lineItem
  * @returns {import('ts-fsrs').Card}
@@ -419,7 +485,7 @@ export class Plugin extends AppPlugin {
 	/**
 	 * Collect all generated flashcard line items (not just due ones).
 	 * Only includes cards that have been initialized via "Flashcards: Generate".
-	 * @returns {Promise<Array<{ lineItem: PluginLineItem, card: import('ts-fsrs').Card, question: string, answer: string, recordName: string, recordGuid: string }>>}
+	 * @returns {Promise<Array<{ lineItem: PluginLineItem, card: import('ts-fsrs').Card, question: string, answer: string, recordName: string, recordGuid: string, ancestors: string[] }>>}
 	 */
 	async _collectAllCards() {
 		const allRecords = this.data.getAllRecords();
@@ -446,6 +512,7 @@ export class Plugin extends AppPlugin {
 					answer: fc.answer,
 					recordName: record.getName(),
 					recordGuid: record.guid,
+					ancestors: buildAncestorBreadcrumb(li, lineItems),
 				});
 			}
 		}
@@ -759,7 +826,7 @@ export class Plugin extends AppPlugin {
 	 * Collect flashcard line items that are due for review.
 	 * @param {object} [opts]
 	 * @param {Set<string>} [opts.recordGuids] - if provided, only include cards from these records
-	 * @returns {Promise<Array<{ lineItem: PluginLineItem, card: import('ts-fsrs').Card, question: string, answer: string, recordName: string }>>}
+	 * @returns {Promise<Array<{ lineItem: PluginLineItem, card: import('ts-fsrs').Card, question: string, answer: string, recordName: string, recordGuid: string, ancestors: string[] }>>}
 	 */
 	async _collectDueCards({ recordGuids } = {}) {
 		const now = new Date();
@@ -790,6 +857,8 @@ export class Plugin extends AppPlugin {
 						question: fc.question,
 						answer: fc.answer,
 						recordName: record.getName(),
+						recordGuid: record.guid,
+						ancestors: buildAncestorBreadcrumb(li, lineItems),
 					});
 				}
 			}
@@ -922,9 +991,20 @@ export class Plugin extends AppPlugin {
 			</div>
 		`;
 
+		// Breadcrumb (sits above the card, like buttons sit below)
+		const rawAncestors = entry.ancestors || [];
+		const bc = truncateBreadcrumbs(entry.recordName, rawAncestors);
+		let breadcrumbHTML = `<div class="flashcard-breadcrumb">`;
+		breadcrumbHTML += `<a class="flashcard-breadcrumb-note" href="#" data-record-guid="${esc(entry.recordGuid)}" title="${esc(entry.recordName)}">${esc(bc.noteName)}</a>`;
+		for (let i = 0; i < bc.crumbs.length; i++) {
+			const fullText = rawAncestors[i] || bc.crumbs[i];
+			breadcrumbHTML += `<span class="flashcard-breadcrumb-sep">\u203A</span>`;
+			breadcrumbHTML += `<span class="flashcard-breadcrumb-crumb" title="${esc(fullText)}">${esc(bc.crumbs[i])}</span>`;
+		}
+		breadcrumbHTML += `</div>`;
+
 		// Card face
 		let cardInner = `
-			<div class="flashcard-source">${esc(entry.recordName)}</div>
 			<div class="flashcard-question">${esc(entry.question)}</div>
 		`;
 
@@ -977,13 +1057,36 @@ export class Plugin extends AppPlugin {
 
 		container.innerHTML = `
 			${progressHTML}
+			${breadcrumbHTML}
 			<div class="flashcard-card" id="fc-card">
 				${cardInner}
 			</div>
 			${buttonsHTML}
 		`;
 
-		// Event listeners
+		// Event listeners — breadcrumb note link
+		const noteLink = container.querySelector('.flashcard-breadcrumb-note');
+		if (noteLink) {
+			noteLink.addEventListener('click', async (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				const guid = noteLink.getAttribute('data-record-guid');
+				if (!guid) return;
+				const wsGuid = this.getWorkspaceGuid();
+				const newPanel = await this.ui.createPanel({ afterPanel: this._panel });
+				if (newPanel) {
+					setTimeout(() => {
+						newPanel.navigateTo({
+							type: 'edit_panel',
+							rootId: guid,
+							subId: null,
+							workspaceGuid: wsGuid,
+						});
+					}, 0);
+				}
+			});
+		}
+
 		if (!revealed) {
 			container.querySelector('#fc-card')?.addEventListener('click', () => {
 				this._practiceRevealed = true;
