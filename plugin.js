@@ -269,15 +269,44 @@ export class Plugin extends AppPlugin {
 }
 .fc-dashboard-header {
 	margin-bottom: 24px;
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 16px;
+}
+.fc-dashboard-header-left {
+	display: flex;
+	flex-direction: column;
 }
 .fc-dashboard-title {
 	font-size: 22px;
 	font-weight: 700;
-	margin-bottom: 4px;
 }
 .fc-dashboard-subtitle {
 	font-size: 13px;
 	opacity: 0.45;
+	margin-top: 6px;
+}
+.fc-dashboard-practice-btn {
+	padding: 8px 16px;
+	border-radius: 8px;
+	border: 1px solid rgba(70,180,100,0.35);
+	background: transparent;
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 600;
+	font-family: inherit;
+	color: #46b464;
+	white-space: nowrap;
+	transition: background 0.15s ease, border-color 0.15s ease;
+	flex-shrink: 0;
+}
+.fc-dashboard-practice-btn:hover {
+	background: rgba(70,180,100,0.12);
+	border-color: rgba(70,180,100,0.6);
+}
+.fc-dashboard-practice-btn:active {
+	transform: scale(0.97);
 }
 .fc-dashboard-loading {
 	font-size: 14px;
@@ -535,7 +564,9 @@ export class Plugin extends AppPlugin {
 		// Loading state
 		container.innerHTML = `
 			<div class="fc-dashboard-header">
-				<div class="fc-dashboard-title">📋 Flashcards Dashboard</div>
+				<div class="fc-dashboard-header-left">
+					<div class="fc-dashboard-title">Flashcards Dashboard</div>
+				</div>
 			</div>
 			<div class="fc-dashboard-loading">Loading flashcards…</div>
 		`;
@@ -544,14 +575,26 @@ export class Plugin extends AppPlugin {
 
 		container.innerHTML = '';
 
+		// Count due today
+		const now = new Date();
+		const dueCount = allCards.filter(e => e.card.due <= now).length;
+
 		// Header
 		const header = document.createElement('div');
 		header.className = 'fc-dashboard-header';
 		header.innerHTML = `
-			<div class="fc-dashboard-title">📋 Flashcards Dashboard</div>
-			<div class="fc-dashboard-subtitle">${allCards.length} flashcard${allCards.length !== 1 ? 's' : ''} found</div>
+			<div class="fc-dashboard-header-left">
+				<div class="fc-dashboard-title">Flashcards Dashboard</div>
+				<div class="fc-dashboard-subtitle">Total flashcards: ${allCards.length}</div>
+			</div>
+			<button class="fc-dashboard-practice-btn" id="fc-dashboard-practice-btn">Practice Today's Cards (${dueCount})</button>
 		`;
 		container.appendChild(header);
+
+		// Practice button click handler
+		header.querySelector('#fc-dashboard-practice-btn')?.addEventListener('click', () => {
+			this._startPracticeSession();
+		});
 
 		if (allCards.length === 0) {
 			container.innerHTML += `
