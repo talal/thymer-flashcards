@@ -968,6 +968,12 @@ export class Plugin extends AppPlugin {
 		el.innerHTML = '';
 		el.appendChild(container);
 
+		// Clean up any existing keyboard handler before adding a new one
+		if (this._keyHandler) {
+			document.removeEventListener('keydown', this._keyHandler);
+			this._keyHandler = null;
+		}
+
 		// Keyboard handler
 		this._keyHandler = (e) => this._handleKey(e, panel);
 		document.addEventListener('keydown', this._keyHandler);
@@ -1187,6 +1193,13 @@ export class Plugin extends AppPlugin {
 	 * @param {PluginPanel} panel
 	 */
 	_handleKey(e, panel) {
+		// If our practice container is no longer in the DOM, the user navigated
+		// away — clean up the listener so we stop intercepting keys.
+		if (!this._panelEl || !this._panelEl.isConnected) {
+			this._cleanup();
+			return;
+		}
+
 		// Ignore if not our panel that's active
 		if (!panel.isActive()) return;
 
