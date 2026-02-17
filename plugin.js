@@ -1025,28 +1025,29 @@ export class Plugin extends AppPlugin {
 			const easyCard  = preview[Rating.Easy].card;
 
 			buttonsHTML = `
-				<div class="flashcard-buttons">
-					<button class="flashcard-btn flashcard-btn--again" data-grade="1">
-						<span class="flashcard-btn-label">Again</span>
-						<span class="flashcard-btn-interval">${formatInterval(againCard)}</span>
-					</button>
-					<button class="flashcard-btn flashcard-btn--hard" data-grade="2">
-						<span class="flashcard-btn-label">Hard</span>
-						<span class="flashcard-btn-interval">${formatInterval(hardCard)}</span>
-					</button>
-					<button class="flashcard-btn flashcard-btn--good" data-grade="3">
-						<span class="flashcard-btn-label">Good</span>
-						<span class="flashcard-btn-interval">${formatInterval(goodCard)}</span>
-					</button>
-					<button class="flashcard-btn flashcard-btn--easy" data-grade="4">
-						<span class="flashcard-btn-label">Easy</span>
-						<span class="flashcard-btn-interval">${formatInterval(easyCard)}</span>
-					</button>
-				</div>
-				<div class="flashcard-shortcuts">
-					<kbd>1</kbd> Again &nbsp; <kbd>2</kbd> Hard &nbsp; <kbd>3</kbd> Good &nbsp; <kbd>4</kbd> Easy
-				</div>
-			`;
+					<div class="flashcard-buttons">
+						<button class="flashcard-btn flashcard-btn--again" data-grade="1">
+							<span class="flashcard-btn-tooltip">Press <kbd>1</kbd></span>
+							<span class="flashcard-btn-label">Again</span>
+							<span class="flashcard-btn-interval">${formatInterval(againCard)}</span>
+						</button>
+						<button class="flashcard-btn flashcard-btn--hard" data-grade="2">
+							<span class="flashcard-btn-tooltip">Press <kbd>2</kbd></span>
+							<span class="flashcard-btn-label">Hard</span>
+							<span class="flashcard-btn-interval">${formatInterval(hardCard)}</span>
+						</button>
+						<button class="flashcard-btn flashcard-btn--good" data-grade="3">
+							<span class="flashcard-btn-tooltip">Press <kbd>3</kbd></span>
+							<span class="flashcard-btn-label">Good</span>
+							<span class="flashcard-btn-interval">${formatInterval(goodCard)}</span>
+						</button>
+						<button class="flashcard-btn flashcard-btn--easy" data-grade="4">
+							<span class="flashcard-btn-tooltip">Press <kbd>4</kbd></span>
+							<span class="flashcard-btn-label">Easy</span>
+							<span class="flashcard-btn-interval">${formatInterval(easyCard)}</span>
+						</button>
+					</div>
+				`;
 		} else {
 			buttonsHTML = `
 				<div class="flashcard-shortcuts">
