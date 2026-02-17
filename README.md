@@ -23,12 +23,38 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions.
 
 Write flashcards anywhere in your notes using the `::` separator:
 
+### Single-line
+
 ```
 Capital of France? :: Paris
 Who created this plugin? :: Claude
 ```
 
-Each line containing `::` with non-empty text on both sides is treated as a flashcard.
+Each line containing `::` with a non-empty question and answer is treated as a flashcard.
+
+### Multiline (children as answer)
+
+Indented lines (children) below a `::` line are gathered as additional answer content, preserving nesting:
+
+```
+Phases of mitosis ::
+  Prophase
+  Metaphase
+  Anaphase
+  Telophase
+```
+
+You can also combine an inline answer with children for elaboration:
+
+```
+Capital of Japan :: Tokyo
+  Population ~14 million (metro area)
+  Located on Honshu island
+```
+
+When both an inline answer and children are present, the inline answer is displayed as the primary answer (centered, full size) and children are shown below as supporting detail (slightly smaller, with indentation preserved).
+
+FSRS metadata is always stored on the `::` line item itself — children are only used for display content.
 
 ## Commands
 
@@ -48,7 +74,7 @@ Opens a dashboard panel with a table view of all your generated flashcards. The 
 |--------|-------------|
 | **Parent Note** | The note containing the flashcard — click to open it in a new split panel |
 | **Front** | The question (text before `::`) |
-| **Back** | The answer (text after `::`) |
+| **Back** | The answer (text after `::`, truncated to first line for multiline cards) |
 | **Due** | Next review date (e.g. `Feb 10, 2026`) or `New` if never reviewed |
 | **Reviews** | Total number of reviews completed |
 | **Last Practiced** | Day, date, and time in 24hr format (e.g. `Tue Feb 10, 2026 16:00`) or `Never` |
@@ -104,7 +130,7 @@ A summary screen is displayed when all due cards have been reviewed.
 - Creation
   - [x] Single-line basic (one direction) cards
   - [ ] Bidirectional cards — front and reverse directions
-  - [ ] Multi-line cards
+  - [x] Multi-line cards — children (indented lines) as answer content
   - [x] Dashboard
   - [ ] Cloze (fill-in-the-blank) cards
   - [ ] Image occlusion — select areas of image which become flashcards
