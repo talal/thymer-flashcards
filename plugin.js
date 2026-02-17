@@ -287,6 +287,31 @@ export class Plugin extends AppPlugin {
 	opacity: 0.45;
 	margin-top: 6px;
 }
+.fc-dashboard-header-actions {
+	display: flex;
+	gap: 8px;
+	flex-shrink: 0;
+}
+.fc-dashboard-scan-btn {
+	padding: 8px 16px;
+	border-radius: 8px;
+	border: 1px solid rgba(128,128,128,0.25);
+	background: transparent;
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 500;
+	font-family: inherit;
+	color: inherit;
+	white-space: nowrap;
+	transition: background 0.15s ease, border-color 0.15s ease;
+}
+.fc-dashboard-scan-btn:hover {
+	background: rgba(128,128,128,0.12);
+	border-color: rgba(128,128,128,0.45);
+}
+.fc-dashboard-scan-btn:active {
+	transform: scale(0.97);
+}
 .fc-dashboard-practice-btn {
 	padding: 8px 16px;
 	border-radius: 8px;
@@ -299,7 +324,6 @@ export class Plugin extends AppPlugin {
 	color: #46b464;
 	white-space: nowrap;
 	transition: background 0.15s ease, border-color 0.15s ease;
-	flex-shrink: 0;
 }
 .fc-dashboard-practice-btn:hover {
 	background: rgba(70,180,100,0.12);
@@ -587,9 +611,18 @@ export class Plugin extends AppPlugin {
 				<div class="fc-dashboard-title">Flashcards Dashboard</div>
 				<div class="fc-dashboard-subtitle">Total flashcards: ${allCards.length}</div>
 			</div>
-			<button class="fc-dashboard-practice-btn" id="fc-dashboard-practice-btn">Practice Today's Cards (${dueCount})</button>
+			<div class="fc-dashboard-header-actions">
+				<button class="fc-dashboard-scan-btn" id="fc-dashboard-scan-btn">Scan for New Cards</button>
+				<button class="fc-dashboard-practice-btn" id="fc-dashboard-practice-btn">Practice Today's Cards (${dueCount})</button>
+			</div>
 		`;
 		container.appendChild(header);
+
+		// Scan button click handler — generate then re-render dashboard
+		header.querySelector('#fc-dashboard-scan-btn')?.addEventListener('click', async () => {
+			await this.generateFlashcards();
+			this._renderDashboardPanel(panel);
+		});
 
 		// Practice button click handler
 		header.querySelector('#fc-dashboard-practice-btn')?.addEventListener('click', () => {
