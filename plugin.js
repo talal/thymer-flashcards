@@ -42,10 +42,30 @@ function segmentsToText(segments) {
 }
 
 /**
- * Try to parse a flashcard from a line item's text.
- * Returns { question, answer } or null.
+ * Recursively gather text from a line item's children.
+ * Returns an array of { text, depth } objects preserving nesting.
  * @param {PluginLineItem} lineItem
- * @returns {{ question: string, answer: string } | null}
+ * @param {number} depth
+ * @returns {{ text: string, depth: number }[]}
+ */
+function gatherChildrenText(lineItem, depth = 0) {
+	const lines = [];
+	for (const child of (lineItem.children || [])) {
+		const text = segmentsToText(child.segments).trim();
+		if (text) {
+			lines.push({ text, depth });
+		}
+		lines.push(...gatherChildrenText(child, depth + 1));
+	}
+	return lines;
+}
+
+/**
+ * Try to parse a flashcard from a line item's text.
+ * Children of the line item are gathered as additional answer content.
+ * Returns { question, answer, answerLines } or null.
+ * @param {PluginLineItem} lineItem
+ * @returns {{ question: string, answer: string, answerLines: { text: string, depth: number }[] } | null}
  */
 function parseFlashcard(lineItem) {
 	const text = segmentsToText(lineItem.segments);
@@ -53,10 +73,25 @@ function parseFlashcard(lineItem) {
 	if (idx === -1) return null;
 
 	const question = text.slice(0, idx).trim();
-	const answer = text.slice(idx + SEPARATOR.length).trim();
-	if (!question || !answer) return null;
+	const inlineAnswer = text.slice(idx + SEPARATOR.length).trim();
 
-	return { question, answer };
+	// Gather children as additional answer lines
+	const childLines = gatherChildrenText(lineItem);
+
+	// Build answerLines: inline answer at depth 0 (flagged), then children
+	const answerLines = [];
+	if (inlineAnswer) {
+		answerLines.push({ text: inlineAnswer, depth: 0, inline: true });
+	}
+	answerLines.push(...childLines);
+
+	// Need a question and at least some answer content
+	if (!question || answerLines.length === 0) return null;
+
+	// Flat answer string for dashboard / backward compat
+	const answer = answerLines.map(l => l.text).join('\n');
+
+	return { question, answer, answerLines };
 }
 
 /**
@@ -563,6 +598,7 @@ export class Plugin extends AppPlugin {
 					card,
 					question: fc.question,
 					answer: fc.answer,
+					answerLines: fc.answerLines,
 					recordName: record.getName(),
 					recordGuid: record.guid,
 					ancestors: buildAncestorBreadcrumb(li, lineItems),
@@ -702,7 +738,9 @@ export class Plugin extends AppPlugin {
 			// Back
 			const tdBack = document.createElement('td');
 			tdBack.className = 'fc-dashboard-cell-back';
-			tdBack.textContent = entry.answer;
+			tdBack.textContent = entry.answerLines && entry.answerLines.length > 1
+				? entry.answerLines[0].text + ' …'
+				: entry.answer;
 			tr.appendChild(tdBack);
 
 			// Due
@@ -932,6 +970,7 @@ export class Plugin extends AppPlugin {
 						card,
 						question: fc.question,
 						answer: fc.answer,
+						answerLines: fc.answerLines,
 						recordName: record.getName(),
 						recordGuid: record.guid,
 						ancestors: buildAncestorBreadcrumb(li, lineItems),
@@ -1091,9 +1130,19 @@ export class Plugin extends AppPlugin {
 		`;
 
 		if (revealed) {
+			const lines = entry.answerLines || [{ text: entry.answer, depth: 0 }];
+			const isMultiline = lines.length > 1;
+			let answerHTML = '';
+			for (let i = 0; i < lines.length; i++) {
+				const line = lines[i];
+				const indent = line.depth * 40;
+				let cls = 'flashcard-answer-line';
+				cls += line.inline ? ' flashcard-answer-primary' : ' flashcard-answer-detail';
+				answerHTML += `<div class="${cls}" style="padding-left: ${indent}px">${esc(line.text)}</div>`;
+			}
 			cardInner += `
 				<div class="flashcard-divider"></div>
-				<div class="flashcard-answer">${esc(entry.answer)}</div>
+				<div class="flashcard-answer${isMultiline ? ' flashcard-answer--multiline' : ''}">${answerHTML}</div>
 			`;
 		}
 
