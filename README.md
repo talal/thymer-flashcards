@@ -1,5 +1,8 @@
 # Thymer Flashcards Plugin
 
+> [!NOTE]
+> Development paused until the stable release of Thymer.
+
 A spaced repetition flashcards plugin for [Thymer](https://thymer.com) powered by [FSRS](https://github.com/open-spaced-repetition/ts-fsrs) (Free Spaced Repetition Scheduler).
 
 Create flashcards directly inside your notes using a simple `Question :: Answer` syntax, then practice them with Anki-style spaced repetition.
