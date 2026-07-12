@@ -48,6 +48,49 @@ export function gatherChildrenText(lineItem, depth = 0) {
 }
 
 /**
+ * Return the first separator that is neither escaped (`\::`) nor inside an
+ * inline-code segment. Syntax-highlighted code blocks are never flashcards.
+ * @param {PluginLineItem | any} lineItem
+ * @returns {number}
+ */
+export function findFlashcardSeparatorIndex(lineItem) {
+	if (lineItem._flashcardCodeBlock ||
+		(typeof lineItem.getHighlightLanguage === 'function' && lineItem.getHighlightLanguage() != null)) {
+		return -1;
+	}
+
+	let text = '';
+	/** @type {boolean[]} */
+	const protectedCharacters = [];
+	for (const segment of lineItem.segments || []) {
+		const value = typeof segment.text === 'string' ? segment.text : '';
+		text += value;
+		for (let i = 0; i < value.length; i++) protectedCharacters.push(segment.type === 'code');
+	}
+
+	for (let index = 0; index <= text.length - SEPARATOR.length; index++) {
+		if (text.slice(index, index + SEPARATOR.length) !== SEPARATOR) continue;
+		if (protectedCharacters[index] || protectedCharacters[index + 1]) continue;
+
+		let precedingBackslashes = 0;
+		for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor--) {
+			precedingBackslashes++;
+		}
+		if (precedingBackslashes % 2 === 0) return index;
+	}
+	return -1;
+}
+
+/**
+ * Remove the escape character from literal separators in displayed card text.
+ * @param {string} value
+ * @returns {string}
+ */
+export function unescapeCardSeparators(value) {
+	return value.replace(/\\::/g, SEPARATOR);
+}
+
+/**
  * Try to parse a flashcard from a line item's text.
  * Children of the line item are gathered as additional answer content.
  * Returns { question, answer, answerLines } or null.
@@ -56,11 +99,11 @@ export function gatherChildrenText(lineItem, depth = 0) {
  */
 export function parseFlashcard(lineItem) {
 	const text = segmentsToText(lineItem.segments);
-	const idx = text.indexOf(SEPARATOR);
+	const idx = findFlashcardSeparatorIndex(lineItem);
 	if (idx === -1) return null;
 
-	const question = text.slice(0, idx).trim();
-	const inlineAnswer = text.slice(idx + SEPARATOR.length).trim();
+	const question = unescapeCardSeparators(text.slice(0, idx)).trim();
+	const inlineAnswer = unescapeCardSeparators(text.slice(idx + SEPARATOR.length)).trim();
 
 	// Gather children as additional answer lines
 	const childLines = gatherChildrenText(lineItem);
@@ -94,10 +137,68 @@ export function isNestedUnderSeparator(lineItem, byGuid) {
 	while (current.parent_guid) {
 		const parent = byGuid.get(current.parent_guid);
 		if (!parent) break;
-		if (segmentsToText(parent.segments).includes(SEPARATOR)) return true;
+		if (findFlashcardSeparatorIndex(parent) !== -1) return true;
 		current = parent;
 	}
 	return false;
+}
+
+/**
+ * Find flashcards in a record while preserving the existing syntax contract:
+ * descendants of a `::` line are answer content, not independent cards.
+ *
+ * Thymer returns a flat line-item list. Rebuild a lightweight tree from
+ * `parent_guid` rather than relying on the SDK's optional children cache.
+ * The original line item is retained for metadata writes.
+ *
+ * @param {PluginLineItem[]} lineItems
+ * @returns {Array<{ lineItem: PluginLineItem, question: string, answer: string, answerLines: { text: string, depth: number, inline?: boolean }[], ancestors: string[] }>}
+ */
+export function findFlashcardsInRecord(lineItems) {
+	/** @type {Map<string, PluginLineItem[]>} */
+	const childrenByParent = new Map();
+	for (const lineItem of lineItems) {
+		if (!lineItem.parent_guid) continue;
+		const siblings = childrenByParent.get(lineItem.parent_guid) || [];
+		siblings.push(lineItem);
+		childrenByParent.set(lineItem.parent_guid, siblings);
+	}
+
+	/** @type {Map<string, any>} */
+	const hydratedByGuid = new Map();
+	for (const lineItem of lineItems) {
+		hydratedByGuid.set(lineItem.guid, {
+			guid: lineItem.guid,
+			parent_guid: lineItem.parent_guid,
+			segments: lineItem.segments,
+			props: lineItem.props,
+			_flashcardCodeBlock: typeof lineItem.getHighlightLanguage === 'function' &&
+				lineItem.getHighlightLanguage() != null,
+			children: [],
+		});
+	}
+	for (const [guid, hydrated] of hydratedByGuid) {
+		hydrated.children = (childrenByParent.get(guid) || [])
+			.map(child => hydratedByGuid.get(child.guid))
+			.filter(Boolean);
+	}
+
+	const cards = [];
+	for (const lineItem of lineItems) {
+		const hydrated = hydratedByGuid.get(lineItem.guid);
+		if (!hydrated || isNestedUnderSeparator(hydrated, hydratedByGuid)) continue;
+		const parsed = parseFlashcard(hydrated);
+		if (!parsed) continue;
+
+		cards.push({
+			lineItem,
+			question: parsed.question,
+			answer: parsed.answer,
+			answerLines: parsed.answerLines,
+			ancestors: buildAncestorBreadcrumb(hydrated, [...hydratedByGuid.values()]),
+		});
+	}
+	return cards;
 }
 
 /**
@@ -106,7 +207,7 @@ export function isNestedUnderSeparator(lineItem, byGuid) {
  * @returns {boolean}
  */
 export function hasCardMeta(lineItem) {
-	return lineItem.props && lineItem.props[META.due] != null;
+	return Boolean(lineItem.props && lineItem.props[META.due] != null);
 }
 
 /**

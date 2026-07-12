@@ -7,6 +7,7 @@ import {
 	segmentsToText,
 	gatherChildrenText,
 	parseFlashcard,
+	findFlashcardsInRecord,
 	isNestedUnderSeparator,
 	hasCardMeta,
 	buildAncestorBreadcrumb,
@@ -284,6 +285,52 @@ describe('parseFlashcard', () => {
 		assert.ok(fc);
 		assert.equal(fc.question, 'Capital of France');
 		assert.equal(fc.answer, 'Paris');
+	});
+
+	it('does not parse an escaped separator', () => {
+		const li = mkLineItem('C++ uses \\:: for qualified names');
+		assert.equal(parseFlashcard(li), null);
+	});
+
+	it('unescapes literal separators when another separator creates the card', () => {
+		const li = mkLineItem('What does \\:: mean in C++? :: Scope resolution');
+		const fc = parseFlashcard(li);
+		assert.ok(fc);
+		assert.equal(fc.question, 'What does :: mean in C++?');
+		assert.equal(fc.answer, 'Scope resolution');
+	});
+
+	it('unescapes a literal separator in the answer', () => {
+		const li = mkLineItem('C++ scope resolution operator? :: \\::');
+		const fc = parseFlashcard(li);
+		assert.ok(fc);
+		assert.equal(fc.answer, '::');
+	});
+
+	it('does not parse :: inside an inline-code segment', () => {
+		const li = mkMultiSegLineItem([
+			{ type: 'text', text: 'Use ' },
+			{ type: 'code', text: 'std::vector<int>' },
+			{ type: 'text', text: ' in C++' },
+		]);
+		assert.equal(parseFlashcard(li), null);
+	});
+
+	it('can parse a card whose question contains inline code with ::', () => {
+		const li = mkMultiSegLineItem([
+			{ type: 'code', text: 'std::vector' },
+			{ type: 'text', text: ' stores what? :: A dynamic array' },
+		]);
+		const fc = parseFlashcard(li);
+		assert.ok(fc);
+		assert.equal(fc.question, 'std::vector stores what?');
+		assert.equal(fc.answer, 'A dynamic array');
+	});
+
+	it('does not parse syntax-highlighted code blocks', () => {
+		const li = mkLineItem('std::vector<int> values;');
+		li.getHighlightLanguage = () => 'cpp';
+		assert.equal(parseFlashcard(li), null);
 	});
 });
 
@@ -723,6 +770,20 @@ describe('isNestedUnderSeparator', () => {
 		assert.equal(isNestedUnderSeparator(li, byGuid), false);
 	});
 
+	it('does not suppress a child card under an escaped separator', () => {
+		const parent = mkLineItem('C++ uses \\:: for qualified names', { guid: 'parent' });
+		const child = mkLineItem('Valid question :: Valid answer', { guid: 'child', parent_guid: 'parent' });
+		const byGuid = buildMap([parent, child]);
+		assert.equal(isNestedUnderSeparator(child, byGuid), false);
+	});
+
+	it('does not suppress a child card under inline code containing ::', () => {
+		const parent = mkMultiSegLineItem([{ type: 'code', text: 'std::vector' }], { guid: 'parent' });
+		const child = mkLineItem('Valid question :: Valid answer', { guid: 'child', parent_guid: 'parent' });
+		const byGuid = buildMap([parent, child]);
+		assert.equal(isNestedUnderSeparator(child, byGuid), false);
+	});
+
 	it('only checks ancestors, not the line item itself', () => {
 		// A top-level :: line should NOT be considered nested under a separator
 		const li = mkLineItem('Q :: A', { guid: 'a' });
@@ -763,5 +824,95 @@ describe('isNestedUnderSeparator', () => {
 		assert.ok(parseFlashcard(card));
 		// c1 would parse as a card too if we didn't filter — verify that
 		assert.ok(parseFlashcard(c1), 'c1 does contain :: and would parse without the guard');
+	});
+});
+
+// ─── findFlashcardsInRecord ──────────────────────────────────────────────────
+
+describe('findFlashcardsInRecord', () => {
+	it('preserves inline Question :: Answer syntax with or without spaces', () => {
+		const spaced = mkLineItem('Capital of France :: Paris', { guid: 'spaced' });
+		const compact = mkLineItem('Capital of France::Paris', { guid: 'compact' });
+		const cards = findFlashcardsInRecord([spaced, compact]);
+
+		assert.equal(cards.length, 2);
+		assert.deepEqual(cards.map(card => ({ question: card.question, answer: card.answer })), [
+			{ question: 'Capital of France', answer: 'Paris' },
+			{ question: 'Capital of France', answer: 'Paris' },
+		]);
+	});
+
+	it('rebuilds child answers from a flat Thymer line-item list', () => {
+		const parent = mkLineItem('Q :: Inline', { guid: 'parent' });
+		const child = mkLineItem('Child one', { guid: 'child', parent_guid: 'parent' });
+		const grandchild = mkLineItem('Grandchild', { guid: 'grandchild', parent_guid: 'child' });
+		const sibling = mkLineItem('Child two', { guid: 'sibling', parent_guid: 'parent' });
+
+		const cards = findFlashcardsInRecord([parent, child, grandchild, sibling]);
+
+		assert.equal(cards.length, 1);
+		assert.equal(cards[0].lineItem, parent);
+		assert.equal(cards[0].answer, 'Inline\nChild one\nGrandchild\nChild two');
+		assert.deepEqual(cards[0].answerLines, [
+			{ text: 'Inline', depth: 0, inline: true },
+			{ text: 'Child one', depth: 0 },
+			{ text: 'Grandchild', depth: 1 },
+			{ text: 'Child two', depth: 0 },
+		]);
+	});
+
+	it('supports answers made entirely from child lines', () => {
+		const parent = mkLineItem('Q ::', { guid: 'parent' });
+		const child = mkLineItem('First', { guid: 'child', parent_guid: 'parent' });
+		const detail = mkLineItem('Detail', { guid: 'detail', parent_guid: 'child' });
+		const second = mkLineItem('Second', { guid: 'second', parent_guid: 'parent' });
+
+		const cards = findFlashcardsInRecord([parent, child, detail, second]);
+
+		assert.equal(cards.length, 1);
+		assert.equal(cards[0].answer, 'First\nDetail\nSecond');
+		assert.deepEqual(cards[0].answerLines, [
+			{ text: 'First', depth: 0 },
+			{ text: 'Detail', depth: 1 },
+			{ text: 'Second', depth: 0 },
+		]);
+	});
+
+	it('treats descendant :: lines as parent answer content, not child cards', () => {
+		const parent = mkLineItem('Parent question :: Parent answer', { guid: 'parent' });
+		const child = mkLineItem('The :: operator is used here', { guid: 'child', parent_guid: 'parent' });
+		const grandchild = mkLineItem('Nested question :: Nested answer', { guid: 'grandchild', parent_guid: 'child' });
+
+		const cards = findFlashcardsInRecord([parent, child, grandchild]);
+
+		assert.equal(cards.length, 1);
+		assert.equal(cards[0].question, 'Parent question');
+		assert.equal(cards[0].answer, 'Parent answer\nThe :: operator is used here\nNested question :: Nested answer');
+	});
+
+	it('allows nested cards below ordinary non-card ancestors', () => {
+		const heading = mkLineItem('Ordinary heading', { guid: 'heading' });
+		const child = mkLineItem('Child question :: Child answer', { guid: 'child', parent_guid: 'heading' });
+
+		const cards = findFlashcardsInRecord([heading, child]);
+
+		assert.equal(cards.length, 1);
+		assert.equal(cards[0].question, 'Child question');
+		assert.deepEqual(cards[0].ancestors, ['Ordinary heading']);
+	});
+
+	it('recognizes a separator split across rich-text segments', () => {
+		const line = mkMultiSegLineItem([
+			{ type: 'text', text: 'Question ' },
+			{ type: 'bold', text: ':' },
+			{ type: 'italic', text: ':' },
+			{ type: 'text', text: ' Answer' },
+		], { guid: 'split' });
+
+		const cards = findFlashcardsInRecord([line]);
+
+		assert.equal(cards.length, 1);
+		assert.equal(cards[0].question, 'Question');
+		assert.equal(cards[0].answer, 'Answer');
 	});
 });

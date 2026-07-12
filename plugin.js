@@ -1,19 +1,10 @@
-import { fsrs, createEmptyCard, Rating, State } from 'ts-fsrs';
+import { fsrs, Rating } from 'ts-fsrs';
 import css from './styles.css';
+import { CardRepository } from './card-repository.js';
 import {
 	SEPARATOR,
-	META_PREFIX,
-	META,
-	segmentsToText,
-	gatherChildrenText,
-	parseFlashcard,
-	hasCardMeta,
-	buildAncestorBreadcrumb,
-	truncateStr,
 	truncateBreadcrumbs,
-	metaToCard,
 	cardToMetaProps,
-	isNestedUnderSeparator,
 	formatInterval,
 	formatDueDate,
 	formatLastPracticed,
@@ -58,6 +49,42 @@ function esc(str) {
 // ─── Plugin ─────────────────────────────────────────────────────────────────
 
 export class Plugin extends AppPlugin {
+	/** @type {CardRepository} */
+	_repository = /** @type {any} */ (null);
+	/** @type {Promise<any>} */
+	_repositoryReady = Promise.resolve();
+	/** @type {PluginPanel | null} */
+	_dashboardPanel = null;
+	/** @type {ReturnType<typeof setTimeout> | null} */
+	_dashboardRefreshTimer = null;
+	/** @type {number} */
+	_dashboardRenderGeneration = 0;
+	/** @type {string[]} */
+	_panelEventHandlerIds = [];
+	/** @type {Map<string, Promise<void>>} */
+	_cardWriteChains = new Map();
+	/** @type {{ remove: () => void, refresh: () => void } | null} */
+	_sidebarWidget = null;
+	/** @type {boolean} */
+	_ratingInProgress = false;
+	/** @type {any[] | null} */
+	_dueCards = null;
+	/** @type {number} */
+	_practiceIndex = 0;
+	/** @type {boolean} */
+	_practiceRevealed = false;
+	/** @type {Record<string, number> | null} */
+	_practiceStats = null;
+	/** @type {string | null} */
+	_practiceTitle = null;
+	/** @type {Set<string> | null} */
+	_practiceRecordGuids = null;
+	/** @type {PluginPanel | null} */
+	_panel = null;
+	/** @type {HTMLElement | null} */
+	_panelEl = null;
+	/** @type {((event: KeyboardEvent) => void) | null} */
+	_keyHandler = null;
 
 	onLoad() {
 		this.ui.injectCSS(css);
@@ -239,7 +266,7 @@ export class Plugin extends AppPlugin {
 		`);
 
 		this.ui.addCommandPaletteCommand({
-			label: 'Flashcards: Generate',
+			label: 'Flashcards: Refresh Cards',
 			icon: 'ti-flame',
 			onSelected: () => this.generateFlashcards(),
 		});
@@ -288,49 +315,54 @@ export class Plugin extends AppPlugin {
 			panel.setTitle('Flashcards Dashboard');
 			this._renderDashboardPanel(panel);
 		});
+
+		this._repository = new CardRepository({
+			data: this.data,
+			events: this.events,
+			onChanged: () => this._handleRepositoryChanged(),
+		});
+		this._sidebarWidget = this.ui.addSidebarWidget(container => this._renderSidebarWidget(container));
+
+		this._repositoryReady = this._repository.start().catch(error => {
+			console.error('Flashcards: initial indexing failed', error);
+			this.ui.addToaster({
+				title: 'Flashcard indexing failed',
+				message: 'Use “Flashcards: Refresh Cards” to try again.',
+				dismissible: true,
+				autoDestroyTime: 5000,
+			});
+		});
+
+		if (this.events) {
+			this._panelEventHandlerIds.push(
+				this.events.on('panel.navigated', event => this._onPanelLifecycle(event, false)),
+				this.events.on('panel.closed', event => this._onPanelLifecycle(event, true)),
+			);
+		}
 	}
 
-	// ── Generate flashcards ───────────────────────────────────────────────
+	/**
+	 * @param {PluginEventPanel} event
+	 * @param {boolean} closed
+	 */
+	_onPanelLifecycle(event, closed) {
+		const panelId = event.panel.getId();
+		if (this._panel?.getId() === panelId && (closed || event.panel.getType() !== PANEL_ID)) {
+			this._cleanup();
+		}
+		if (this._dashboardPanel?.getId() === panelId &&
+			(closed || event.panel.getType() !== DASHBOARD_PANEL_ID)) {
+			this._dashboardPanel = null;
+		}
+	}
+
+	// ── Refresh flashcards ────────────────────────────────────────────────
 
 	async generateFlashcards() {
-		const allRecords = this.data.getAllRecords();
-		let created = 0;
-		let existing = 0;
-		let scanned = 0;
-
-		for (const record of allRecords) {
-			/** @type {PluginLineItem[]} */
-			let lineItems;
-			try {
-				lineItems = await record.getLineItems();
-			} catch {
-				continue;
-			}
-
-			const byGuid = new Map();
-			for (const li of lineItems) byGuid.set(li.guid, li);
-
-			for (const li of lineItems) {
-				if (isNestedUnderSeparator(li, byGuid)) continue;
-				const fc = parseFlashcard(li);
-				if (!fc) continue;
-
-				scanned++;
-
-				if (hasCardMeta(li)) {
-					existing++;
-				} else {
-					// Initialize new FSRS card
-					const card = createEmptyCard(new Date());
-					await cardToMeta(li, card);
-					created++;
-				}
-			}
-		}
-
+		const stats = await this._repository.generate();
 		this.ui.addToaster({
-			title: 'Flashcards generated',
-			message: `Scanned ${allRecords.length} notes. Found ${scanned} flashcards: ${created} new, ${existing} already tracked.`,
+			title: 'Flashcards refreshed',
+			message: `Scanned ${stats.records} notes. Found ${stats.found} flashcards: ${stats.created} new, ${stats.existing} already tracked.`,
 			dismissible: true,
 			autoDestroyTime: 5000,
 		});
@@ -345,47 +377,56 @@ export class Plugin extends AppPlugin {
 		}
 	}
 
+	_handleRepositoryChanged() {
+		this._scheduleDashboardRefresh();
+		this._sidebarWidget?.refresh();
+	}
+
+	/** @param {HTMLElement} container */
+	_renderSidebarWidget(container) {
+		const cards = this._repository.getAllCards();
+		const due = this._repository.getDueCards().length;
+		container.innerHTML = `
+			<div class="fc-sidebar-summary">
+				<div class="fc-sidebar-summary-counts">
+					<strong>${due}</strong> due <span>·</span> ${cards.length} total
+				</div>
+				<div class="fc-sidebar-summary-actions">
+					<button type="button" data-action="dashboard">Dashboard</button>
+					<button type="button" data-action="study" ${due === 0 ? 'disabled' : ''}>Study</button>
+				</div>
+			</div>
+		`;
+		const openDashboard = () => this.openDashboard();
+		const startStudy = () => this._startPracticeSession();
+		container.querySelector('[data-action="dashboard"]')?.addEventListener('click', openDashboard);
+		container.querySelector('[data-action="study"]')?.addEventListener('click', startStudy);
+		return () => {
+			container.querySelector('[data-action="dashboard"]')?.removeEventListener('click', openDashboard);
+			container.querySelector('[data-action="study"]')?.removeEventListener('click', startStudy);
+		};
+	}
+
+	_scheduleDashboardRefresh() {
+		if (!this._dashboardPanel || this._dashboardRefreshTimer != null) return;
+		this._dashboardRefreshTimer = setTimeout(() => {
+			this._dashboardRefreshTimer = null;
+			const panel = this._dashboardPanel;
+			const element = panel?.getElement();
+			if (panel && element?.isConnected && panel.getType() === DASHBOARD_PANEL_ID) {
+				this._renderDashboardPanel(panel);
+			}
+		}, 100);
+	}
+
 	/**
 	 * Collect all generated flashcard line items (not just due ones).
-	 * Only includes cards that have been initialized via "Flashcards: Generate".
-	 * @returns {Promise<Array<{ lineItem: PluginLineItem, card: import('ts-fsrs').Card, question: string, answer: string, recordName: string, recordGuid: string, ancestors: string[] }>>}
+	 * Cards are initialized automatically during indexing and refresh.
+	 * @returns {Promise<any[]>}
 	 */
 	async _collectAllCards() {
-		const allRecords = this.data.getAllRecords();
-		const allCards = [];
-
-		for (const record of allRecords) {
-			let lineItems;
-			try {
-				lineItems = await record.getLineItems();
-			} catch {
-				continue;
-			}
-
-			const byGuid = new Map();
-			for (const li of lineItems) byGuid.set(li.guid, li);
-
-			for (const li of lineItems) {
-				if (isNestedUnderSeparator(li, byGuid)) continue;
-				const fc = parseFlashcard(li);
-				if (!fc) continue;
-				if (!hasCardMeta(li)) continue;
-
-				const card = metaToCard(li);
-				allCards.push({
-					lineItem: li,
-					card,
-					question: fc.question,
-					answer: fc.answer,
-					answerLines: fc.answerLines,
-					recordName: record.getName(),
-					recordGuid: record.guid,
-					ancestors: buildAncestorBreadcrumb(li, lineItems),
-				});
-			}
-		}
-
-		return allCards;
+		await this._repository.whenReady();
+		return this._repository.getAllCards();
 	}
 
 	/**
@@ -394,6 +435,9 @@ export class Plugin extends AppPlugin {
 	async _renderDashboardPanel(panel) {
 		const el = panel.getElement();
 		if (!el) return;
+		this._dashboardPanel = panel;
+		const renderGeneration = this._dashboardRenderGeneration + 1;
+		this._dashboardRenderGeneration = renderGeneration;
 
 		el.innerHTML = '';
 		const container = document.createElement('div');
@@ -411,6 +455,7 @@ export class Plugin extends AppPlugin {
 		`;
 
 		const allCards = await this._collectAllCards();
+		if (this._dashboardRenderGeneration !== renderGeneration || !container.isConnected) return;
 
 		container.innerHTML = '';
 
@@ -427,7 +472,7 @@ export class Plugin extends AppPlugin {
 				<div class="fc-dashboard-subtitle">Total flashcards: ${allCards.length}</div>
 			</div>
 			<div class="fc-dashboard-header-actions">
-				<button class="fc-dashboard-scan-btn" id="fc-dashboard-scan-btn">Scan for New Cards</button>
+				<button class="fc-dashboard-scan-btn" id="fc-dashboard-scan-btn">Refresh Cards</button>
 				<button class="fc-dashboard-practice-btn" id="fc-dashboard-practice-btn">Practice Today's Cards (${dueCount})</button>
 			</div>
 		`;
@@ -450,8 +495,7 @@ export class Plugin extends AppPlugin {
 					<div class="flashcard-empty-emoji">📭</div>
 					<div class="flashcard-empty-title">No flashcards found</div>
 					<div class="flashcard-empty-subtitle">
-						Use <strong>Flashcards: Generate</strong> to scan your notes,<br>
-						or write cards with the <code>${esc(SEPARATOR)}</code> syntax:<br>
+						Write a card in any note using the <code>${esc(SEPARATOR)}</code> syntax:<br>
 						<code>Question ${esc(SEPARATOR)} Answer</code>
 					</div>
 				</div>
@@ -492,16 +536,13 @@ export class Plugin extends AppPlugin {
 			noteLink.href = '#';
 			noteLink.addEventListener('click', async (e) => {
 				e.preventDefault();
-				const wsGuid = this.getWorkspaceGuid();
 				const newPanel = await this.ui.createPanel({ afterPanel: panel });
 				if (newPanel) {
 					setTimeout(() => {
 						newPanel.navigateTo({
-							type: 'edit_panel',
-							rootId: entry.recordGuid,
-							subId: null,
-							workspaceGuid: wsGuid,
-						});
+														type: 'edit_panel', rootId: null, subId: null, workspaceGuid: null,
+														itemGuid: entry.lineItemGuid, highlight: true,
+													});
 					}, 0);
 				}
 			});
@@ -646,7 +687,9 @@ export class Plugin extends AppPlugin {
 			document.body.appendChild(dummyBtn);
 
 			// Outside-click handler (declared as let so cleanup can reference it)
+			/** @type {((event: MouseEvent) => void) | null} */
 			let onOutsideClick = null;
+			/** @type {PluginDropdown | null} */
 			let dropdown = null;
 
 			// Helper to tear down the anchor button and listener
@@ -674,13 +717,13 @@ export class Plugin extends AppPlugin {
 			});
 
 			// If the user clicks outside the dropdown, tear everything down
-			onOutsideClick = (e) => {
+			onOutsideClick = (_e) => {
 				// Give the dropdown a frame to handle its own click
 				requestAnimationFrame(() => {
 					// If the anchor is already gone an onSelected handler fired
 					if (!dummyBtn.parentNode) return;
 					cleanupAnchor();
-					dropdown.destroy();
+					dropdown?.destroy();
 				});
 			};
 			// Delay attaching so the current click doesn't immediately dismiss
@@ -719,52 +762,11 @@ export class Plugin extends AppPlugin {
 	 * Collect flashcard line items that are due for review.
 	 * @param {object} [opts]
 	 * @param {Set<string>} [opts.recordGuids] - if provided, only include cards from these records
-	 * @returns {Promise<Array<{ lineItem: PluginLineItem, card: import('ts-fsrs').Card, question: string, answer: string, recordName: string, recordGuid: string, ancestors: string[] }>>}
+	 * @returns {Promise<any[]>}
 	 */
 	async _collectDueCards({ recordGuids } = {}) {
-		const now = new Date();
-		const allRecords = this.data.getAllRecords();
-		const dueCards = [];
-
-		for (const record of allRecords) {
-			// Skip records not in the filter set (if provided)
-			if (recordGuids && !recordGuids.has(record.guid)) continue;
-
-			let lineItems;
-			try {
-				lineItems = await record.getLineItems();
-			} catch {
-				continue;
-			}
-
-			const byGuid = new Map();
-			for (const li of lineItems) byGuid.set(li.guid, li);
-
-			for (const li of lineItems) {
-				if (isNestedUnderSeparator(li, byGuid)) continue;
-				const fc = parseFlashcard(li);
-				if (!fc) continue;
-				if (!hasCardMeta(li)) continue;
-
-				const card = metaToCard(li);
-				if (card.due <= now) {
-					dueCards.push({
-						lineItem: li,
-						card,
-						question: fc.question,
-						answer: fc.answer,
-						answerLines: fc.answerLines,
-						recordName: record.getName(),
-						recordGuid: record.guid,
-						ancestors: buildAncestorBreadcrumb(li, lineItems),
-					});
-				}
-			}
-		}
-
-		// Sort: oldest due first
-		dueCards.sort((a, b) => a.card.due.getTime() - b.card.due.getTime());
-		return dueCards;
+		await this._repository.whenReady();
+		return this._repository.getDueCards({ recordGuids });
 	}
 
 	// ── Render practice panel ─────────────────────────────────────────────
@@ -778,13 +780,12 @@ export class Plugin extends AppPlugin {
 
 		// Fetch due cards if we don't have them yet (e.g., panel restored)
 		if (!this._dueCards) {
-			this._dueCards = await this._collectDueCards({ recordGuids: this._practiceRecordGuids });
+			this._dueCards = await this._collectDueCards({ recordGuids: this._practiceRecordGuids || undefined });
 			this._practiceIndex = 0;
 			this._practiceRevealed = false;
 			this._practiceStats = { again: 0, hard: 0, good: 0, easy: 0 };
 		}
 
-		const cards = this._dueCards;
 		const container = document.createElement('div');
 		container.className = 'flashcard-container';
 		el.innerHTML = '';
@@ -797,7 +798,7 @@ export class Plugin extends AppPlugin {
 		}
 
 		// Keyboard handler
-		this._keyHandler = (e) => this._handleKey(e, panel);
+		this._keyHandler = (/** @type {KeyboardEvent} */ e) => this._handleKey(e, panel);
 		document.addEventListener('keydown', this._keyHandler);
 
 		this._panelEl = container;
@@ -831,8 +832,7 @@ export class Plugin extends AppPlugin {
 					<div class="flashcard-empty-title">No flashcards due</div>
 					${scopeHTML}
 					<div class="flashcard-empty-subtitle">
-						All caught up! Come back later, or use<br>
-						<strong>Flashcards: Generate</strong> to scan your notes for new cards.
+						All caught up! New cards are detected automatically.
 						<br><br>
 						Use the <code>${esc(SEPARATOR)}</code> syntax in your notes:<br>
 						<code>Question ${esc(SEPARATOR)} Answer</code>
@@ -844,7 +844,7 @@ export class Plugin extends AppPlugin {
 
 		// All done
 		if (idx >= total) {
-			const stats = this._practiceStats;
+			const stats = this._practiceStats || { again: 0, hard: 0, good: 0, easy: 0 };
 			container.innerHTML = `
 				<div class="flashcard-done">
 					<div class="flashcard-done-emoji">✅</div>
@@ -987,15 +987,12 @@ export class Plugin extends AppPlugin {
 				e.stopPropagation();
 				const guid = noteLink.getAttribute('data-record-guid');
 				if (!guid) return;
-				const wsGuid = this.getWorkspaceGuid();
-				const newPanel = await this.ui.createPanel({ afterPanel: this._panel });
+				const newPanel = await this.ui.createPanel({ afterPanel: this._panel || undefined });
 				if (newPanel) {
 					setTimeout(() => {
 						newPanel.navigateTo({
-							type: 'edit_panel',
-							rootId: guid,
-							subId: null,
-							workspaceGuid: wsGuid,
+							type: 'edit_panel', rootId: null, subId: null, workspaceGuid: null,
+							itemGuid: entry.lineItemGuid || guid, highlight: true,
 						});
 					}, 0);
 				}
@@ -1056,6 +1053,7 @@ export class Plugin extends AppPlugin {
 				this._renderCurrentCard();
 			}
 		} else {
+			/** @type {Record<string, import('ts-fsrs').Grade>} */
 			const keyMap = { '1': Rating.Again, '2': Rating.Hard, '3': Rating.Good, '4': Rating.Easy };
 			const grade = keyMap[e.key];
 			if (grade) {
@@ -1069,31 +1067,65 @@ export class Plugin extends AppPlugin {
 	 * Apply a rating to the current card and advance.
 	 * @param {import('ts-fsrs').Grade} grade
 	 */
-	async _rateCard(grade) {
+	_rateCard(grade) {
+		if (this._ratingInProgress) return;
 		const cards = this._dueCards || [];
 		const idx = this._practiceIndex || 0;
 		if (idx >= cards.length) return;
+		this._ratingInProgress = true;
 
 		const entry = cards[idx];
-		const now = new Date();
-
-		// Apply FSRS
-		const result = f.next(entry.card, now, grade);
+		const result = f.next(entry.card, new Date(), grade);
 		const newCard = result.card;
 
-		// Persist to line item
-		await cardToMeta(entry.lineItem, newCard);
+		// Update the session and shared index immediately. Persistence is serialized
+		// in the background so backend latency never delays the next card.
+		entry.card = newCard;
+		this._repository.updateSchedule(entry.lineItemGuid, newCard);
+		this._queueCardWrite(entry.lineItem, newCard);
 
-		// Update stats
+		/** @type {Record<number, string>} */
 		const statKey = { [Rating.Again]: 'again', [Rating.Hard]: 'hard', [Rating.Good]: 'good', [Rating.Easy]: 'easy' };
 		if (this._practiceStats && statKey[grade]) {
 			this._practiceStats[statKey[grade]]++;
 		}
 
-		// Advance
 		this._practiceIndex = idx + 1;
 		this._practiceRevealed = false;
+		this._ratingInProgress = false;
 		this._renderCurrentCard();
+	}
+
+	/**
+	 * @param {PluginLineItem} lineItem
+	 * @param {import('ts-fsrs').Card} card
+	 */
+	_queueCardWrite(lineItem, card) {
+		if (!this._cardWriteChains) this._cardWriteChains = new Map();
+		const previous = this._cardWriteChains.get(lineItem.guid) || Promise.resolve();
+		const next = previous.catch(() => {}).then(async () => {
+			for (let attempt = 1; attempt <= 3; attempt++) {
+				try {
+					if (await cardToMeta(lineItem, card)) return;
+				} catch (error) {
+					if (attempt === 3) throw error;
+				}
+				await new Promise(resolve => setTimeout(resolve, attempt * 250));
+			}
+			throw new Error('Thymer rejected the flashcard metadata update');
+		});
+		this._cardWriteChains.set(lineItem.guid, next);
+		next.catch(/** @param {any} error */ error => {
+			console.error(`Flashcards: failed to save review for ${lineItem.guid}`, error);
+			this.ui.addToaster({
+				title: 'Review not saved',
+				message: 'The card could not be updated after three attempts. Refresh cards before reviewing it again.',
+				dismissible: true,
+				autoDestroyTime: 6000,
+			});
+		}).finally(() => {
+			if (this._cardWriteChains?.get(lineItem.guid) === next) this._cardWriteChains.delete(lineItem.guid);
+		});
 	}
 
 	/**
@@ -1110,11 +1142,21 @@ export class Plugin extends AppPlugin {
 		this._practiceStats = null;
 		this._practiceTitle = null;
 		this._practiceRecordGuids = null;
+		this._ratingInProgress = false;
 		this._panelEl = null;
 		this._panel = null;
 	}
 
 	onUnload() {
 		this._cleanup();
+		this._repository?.dispose();
+		this._sidebarWidget?.remove();
+		this._sidebarWidget = null;
+		if (this._dashboardRefreshTimer != null) clearTimeout(this._dashboardRefreshTimer);
+		this._dashboardRefreshTimer = null;
+		if (this.events) {
+			for (const handlerId of this._panelEventHandlerIds || []) this.events.off(handlerId);
+		}
+		this._panelEventHandlerIds = [];
 	}
 }

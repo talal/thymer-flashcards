@@ -9,7 +9,7 @@
     "dev": "node dev.js",
     "dev:verbose": "node dev.js --print-code",
     "build": "node dev.js --once",
-    "test": "node --test lib.test.js"
+    "test": "node --test *.test.js"
   },
   "devDependencies": {
     "chokidar": "latest",

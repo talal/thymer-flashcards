@@ -33,7 +33,7 @@ Capital of France? :: Paris
 Who created this plugin? :: Claude
 ```
 
-Each line containing `::` with a non-empty question and answer is treated as a flashcard.
+Each line containing an unescaped `::` with a non-empty question and answer is treated as a flashcard. Separators inside inline code or syntax-highlighted code blocks are ignored.
 
 ### Multiline (children as answer)
 
@@ -59,15 +59,24 @@ When both an inline answer and children are present, the inline answer is displa
 
 FSRS metadata is always stored on the `::` line item itself — children are only used for display content.
 
+### Literal `::` and code
+
+Escape a literal separator with a backslash when it appears in ordinary text:
+
+```
+C++ uses \\:: for qualified names
+C++ scope resolution operator? :: \\::
+```
+
+The first line is not a flashcard. The second is a card whose displayed answer is `::`. A `::` inside inline code or a syntax-highlighted code block is also treated as code rather than a flashcard separator.
+
 ## Commands
 
 Open the Command Palette (`Cmd+P` / `Ctrl+P`) and search for:
 
-### Flashcards: Generate
+### Flashcards: Refresh Cards
 
-Scans **all notes** in your workspace for lines matching the `Question :: Answer` pattern. New flashcards are initialized with FSRS metadata so they'll appear in your next practice session. Already-tracked flashcards are left untouched.
-
-Run this after adding new flashcards to your notes.
+Forces a full refresh of the plugin's flashcard index. New flashcards are normally detected and initialized automatically as you edit notes; this command is available for recovery or after a large import. Existing FSRS schedules are left untouched.
 
 ### Flashcards: Dashboard
 
@@ -82,7 +91,7 @@ Opens a dashboard panel with a table view of all your generated flashcards. The 
 | **Reviews** | Total number of reviews completed |
 | **Last Practiced** | Day, date, and time in 24hr format (e.g. `Tue Feb 10, 2026 16:00`) or `Never` |
 
-Only flashcards that have been initialized via **Flashcards: Generate** appear in the dashboard.
+Valid flashcards are initialized automatically and appear in the dashboard without requiring a manual scan.
 
 ### Flashcards: Practice
 
@@ -103,6 +112,8 @@ A summary screen is displayed when all due cards have been reviewed.
 ## How It Works
 
 - Flashcard metadata (due date, stability, difficulty, repetition count, etc.) is stored as **meta properties directly on each line item** in your notes
+- The plugin builds a cached index once, then uses Thymer line-item events to update only records that changed
+- References and transclusions are not expanded during indexing, preventing duplicate cards
 - The [FSRS algorithm](https://github.com/open-spaced-repetition/ts-fsrs) schedules reviews based on your ratings, optimizing for ~90% retention
 - Cards start in the **New** state and progress through **Learning → Review** as you practice
 - Forgotten cards enter a **Relearning** phase with shorter intervals
