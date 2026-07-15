@@ -1,3 +1,12 @@
+# Archived project. No maintenance.
+
+**What does this mean?** No further code will be committed and the repository
+will remain in a read-only state.
+
+**Why?** I no longer have the time to maintain this project.
+
+Feel free to fork and make your own changes if needed :)
+
 # Thymer Flashcards Plugin
 
 > [!NOTE]
